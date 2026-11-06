@@ -8,6 +8,7 @@ pub enum VertexInputTarget<'a> {
 }
 
 pub enum ShaderType<'a> {
+    #[allow(unused)]
     Compute,
     Render {
         vertex_input_targets: Option<&'a [(VertexInputTarget<'a>, wgpu::VertexStepMode)]>,
@@ -19,7 +20,7 @@ pub enum EntryPoints {
     Render {
         vertex_ep: String,
         fragment_ep: Option<String>,
-    }
+    },
 }
 
 pub struct VertexBufferLayoutBuilder {
@@ -29,7 +30,7 @@ pub struct VertexBufferLayoutBuilder {
 }
 
 impl VertexBufferLayoutBuilder {
-    pub fn create_buffer_layout(&mut self) -> wgpu::VertexBufferLayout {
+    pub fn create_buffer_layout(&mut self) -> wgpu::VertexBufferLayout<'_> {
         wgpu::VertexBufferLayout {
             array_stride: self.stride,
             step_mode: self.step_mode,
@@ -49,15 +50,18 @@ impl ShaderReflection {
         module: &naga::Module,
         shader_name: &str,
         shader_type: ShaderType,
-        vertex_buffer_builders: &mut Vec<VertexBufferLayoutBuilder>,
+        vertex_buffer_builders: &mut Vec<Option<VertexBufferLayoutBuilder>>,
     ) -> anyhow::Result<Self> {
         let mut entry_points = match shader_type {
             ShaderType::Compute => EntryPoints::Compute,
             ShaderType::Render { .. } => {
                 let vertex_ep: String = String::default();
                 let fragment_ep: Option<String> = None;
-                EntryPoints::Render { vertex_ep, fragment_ep }
-            },
+                EntryPoints::Render {
+                    vertex_ep,
+                    fragment_ep,
+                }
+            }
         };
         let mut validator = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
@@ -110,7 +114,10 @@ impl ShaderReflection {
                 } => {
                     match stage_flag {
                         wgpu::ShaderStages::VERTEX => {
-                            if let EntryPoints::Render { ref mut vertex_ep, .. } = entry_points {
+                            if let EntryPoints::Render {
+                                ref mut vertex_ep, ..
+                            } = entry_points
+                            {
                                 *vertex_ep = ep.name.to_owned();
                             }
                             for arg in &ep.function.arguments {
@@ -138,7 +145,8 @@ impl ShaderReflection {
 
                                 // ensure user provided mappings for argument
                                 let step_mode = match targets.iter().find_map(|(target, mode)| {
-                                    let is_struct = matches!(arg_ty, naga::TypeInner::Struct { .. });
+                                    let is_struct =
+                                        matches!(arg_ty, naga::TypeInner::Struct { .. });
 
                                     let matches = match *target {
                                         VertexInputTarget::Struct(name) => {
@@ -166,23 +174,28 @@ impl ShaderReflection {
                                     &mut offset,
                                     &mut location,
                                     &mut vertex_attributes,
-                                );
+                                )?;
 
-                                if !vertex_attributes.is_empty() {
-                                    vertex_buffer_builders.push(VertexBufferLayoutBuilder {
+                                vertex_buffer_builders.push( match vertex_attributes.is_empty() {
+                                    true => None,
+                                    false => Some(VertexBufferLayoutBuilder {
                                         stride: offset,
                                         step_mode,
                                         attributes: vertex_attributes,
-                                    })
-                                }
+                                    }),
+                                });
                             }
-                        },
+                        }
                         wgpu::ShaderStages::FRAGMENT => {
-                            if let EntryPoints::Render { ref mut fragment_ep, .. } = entry_points {
+                            if let EntryPoints::Render {
+                                ref mut fragment_ep,
+                                ..
+                            } = entry_points
+                            {
                                 *fragment_ep = Some(ep.name.to_owned());
                             }
                         }
-                        _ => {},
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -229,7 +242,10 @@ impl ShaderReflection {
             });
         }
 
-        Ok(Self { entry_points, bind_group_layouts })
+        Ok(Self {
+            entry_points,
+            bind_group_layouts,
+        })
     }
 
     fn populate_vertex_attributes(
@@ -268,7 +284,7 @@ impl ShaderReflection {
                         &mut member_offset,
                         location,
                         vertex_attributes,
-                    );
+                    )?;
                 }
                 *offset += *span as wgpu::BufferAddress;
             }
@@ -330,7 +346,7 @@ impl ShaderReflection {
                         &mut element_offset,
                         location,
                         vertex_attributes,
-                    );
+                    )?;
                     *offset += *stride as wgpu::BufferAddress;
                 }
             }
