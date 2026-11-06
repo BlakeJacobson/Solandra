@@ -1,0 +1,16 @@
+[package]
+name = "solandra"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = { version = "1.2.5", features = ["derive"] }
+glam = { version = "0.34.2", features = ["bytemuck"] }
+log = "0.4.35"
+openusd = "0.8.0"
+pollster = "1.0.1"
+wgpu = "30.0.1"
+winit = "0.30"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "hdr"] }
+anyhow = "1.0.104"
+bitflags = "2.13.2"
