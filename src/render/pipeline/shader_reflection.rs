@@ -1,7 +1,7 @@
 use naga::{Scalar, ScalarKind, VectorSize};
 use wgpu::naga;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VertexInputTarget<'a> {
     Struct(&'a str),
     Parameter(&'a str),

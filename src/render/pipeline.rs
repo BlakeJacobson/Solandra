@@ -1,11 +1,12 @@
-use std::num::NonZero;
+mod shader_reflection;
+
+use std::{collections::HashMap, hash::{DefaultHasher, Hash, Hasher}, num::NonZero};
 
 use anyhow::Ok;
 use wgpu::naga::self;
 
-use crate::render::reflection::*;
-
 bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct RenderPassFlags: u32 {
         const OPAQUE_MAIN = 1 << 0;
 
@@ -19,6 +20,7 @@ pub enum BlendMode {
     Additive,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DepthConfig {
     Disabled,
     Enabled {
@@ -27,13 +29,63 @@ pub enum DepthConfig {
     },
 }
 
-pub struct GraphicsPipeline {
-    pub pipeline: wgpu::RenderPipeline,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RenderPipelineKey(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ComputePipelineKey(u64);
+
+pub struct PipelineRegistry {
+    device: wgpu::Device,
+    render_pipelines: HashMap<RenderPipelineKey, RenderPipeline>,
+    //compute_pipelines: HashMap<ComputePipelineKey, ComputePipeline>,
+}
+
+impl PipelineRegistry {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let device = device.clone();
+        let render_pipelines = HashMap::<RenderPipelineKey, RenderPipeline>::new();
+        // let compute_pipelines = HashMap::<ComputePipelineKey, ComputePipeline>::new();
+        
+        Self { device, render_pipelines }
+    }
+
+    pub fn add_graphics_pipeline(&mut self, pipeline_builder: RenderPipelineBuilder) -> anyhow::Result<RenderPipelineKey> {
+        let key = RenderPipelineKey(pipeline_builder.compute_hash());
+        let pipeline = pipeline_builder.build(&self.device)?;
+
+        self.render_pipelines.insert(key, pipeline);
+
+        Ok(key)
+    }
+
+    pub fn get_graphics_pipeline(&self, key: &RenderPipelineKey) -> anyhow::Result<RenderPipeline> {
+        match self.render_pipelines.get(key) {
+            Some(pipeline) => Ok(pipeline.clone()),
+            None => anyhow::bail!("Requested render pipeline does not exist")
+        }
+    }
+
+    // pub fn add_compute_pipeline(pipeline_builder: ComputePipelineBuilder) -> anyhow::Result<()> {
+    //     todo!();
+    // }
+
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderPipeline {
+    pub inner: wgpu::RenderPipeline,
     pub layout: wgpu::PipelineLayout,
     pub render_pass_flags: RenderPassFlags,
 }
 
-pub struct GraphicsPipelineBuilder<'a> {
+struct ComputePipeline {
+    pub inner: wgpu::ComputePipeline,
+    pub layout: wgpu::PipelineLayout,
+}
+
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+pub struct RenderPipelineBuilder<'a> {
     // Customization
     label: &'a str,
 
@@ -65,7 +117,7 @@ pub struct GraphicsPipelineBuilder<'a> {
     depth_stencil: Option<wgpu::DepthStencilState>,
 
     // Targets
-    vertex_input_targets: Option<&'a [(VertexInputTarget<'a>, wgpu::VertexStepMode)]>,
+    vertex_input_targets: Option<&'a [(shader_reflection::VertexInputTarget<'a>, wgpu::VertexStepMode)]>,
     fragment_output_targets: Vec<Option<wgpu::ColorTargetState>>,
 
     // Pipeline Cache
@@ -75,7 +127,13 @@ pub struct GraphicsPipelineBuilder<'a> {
     render_pass_flags: RenderPassFlags,
 }
 
-impl<'a> GraphicsPipelineBuilder<'a> {
+impl<'a> RenderPipelineBuilder<'a> {
+    pub fn compute_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+
     pub fn new(shader_path: &'a str) -> Self {
         Self {
             label: shader_path,
@@ -204,7 +262,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
 
     pub fn with_vertex_input_targets(
         mut self,
-        vertex_input_targets: &'a [(VertexInputTarget<'a>, wgpu::VertexStepMode)],
+        vertex_input_targets: &'a [(shader_reflection::VertexInputTarget<'a>, wgpu::VertexStepMode)],
     ) -> Self {
         self.vertex_input_targets = Some(vertex_input_targets);
         self
@@ -220,7 +278,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         self
     }
 
-    pub fn build(self, device: &wgpu::Device) -> anyhow::Result<GraphicsPipeline> {
+    fn build(self, device: &wgpu::Device) -> anyhow::Result<RenderPipeline> {
         // Parse the shader
         let source = std::fs::read_to_string(self.shader_path).expect("Failed to read shader file");
         let module = naga::front::wgsl::parse_str(&source).expect("Failed to parse shader file");
@@ -229,12 +287,12 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             label: Some(self.shader_path),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
-        let mut vertex_buffer_layout_builders: Vec<Option<VertexBufferLayoutBuilder>> = Vec::new();
-        let reflection = ShaderReflection::reflect_module(
+        let mut vertex_buffer_layout_builders: Vec<Option<shader_reflection::VertexBufferLayoutBuilder>> = Vec::new();
+        let reflection = shader_reflection::ShaderReflection::reflect_module(
             device,
             &module,
             "",
-            ShaderType::Render {
+            shader_reflection::ShaderType::Render {
                 vertex_input_targets: self.vertex_input_targets,
             },
             &mut vertex_buffer_layout_builders,
@@ -260,10 +318,10 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             });
 
         let (vert_ep, frag_ep) = match reflection.entry_points {
-            EntryPoints::Compute => {
+            shader_reflection::EntryPoints::Compute => {
                 panic!("Tried to construct a render pipeline with a Compute shader type")
             } // Shouldn't be possible if this funciton doesn't change
-            EntryPoints::Render {
+            shader_reflection::EntryPoints::Render {
                 vertex_ep,
                 fragment_ep,
             } => (vertex_ep, fragment_ep),
@@ -300,10 +358,16 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             cache: self.pipeline_cache,
         });
 
-        Ok(GraphicsPipeline {
-            pipeline,
+        Ok(RenderPipeline {
+            inner: pipeline,
             layout: render_pipeline_layout,
             render_pass_flags: self.render_pass_flags,
         })
     }
 }
+
+// pub struct ComputePipelineBuilder<'a> {
+//     label: &'a str,
+// }
+
+// impl<'a> ComputePipelineBuilder<'a> {}
