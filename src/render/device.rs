@@ -2,7 +2,8 @@ use anyhow::Ok;
 
 pub struct RenderSurface {
     pub surface: wgpu::Surface<'static>,
-    pub config: wgpu::SurfaceConfiguration,
+    config: wgpu::SurfaceConfiguration,
+    is_configured: bool,
 }
 
 impl RenderSurface {
@@ -12,7 +13,7 @@ impl RenderSurface {
     ) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let surface = instance.create_surface(window.clone()).unwrap();
-        let config = surface
+        let mut config = surface
             .get_default_config(
                 &instance
                     .request_adapter(&wgpu::RequestAdapterOptions {
@@ -26,17 +27,51 @@ impl RenderSurface {
             )
             .expect("Failed to get a proper surface configuration in render surface init.");
 
-        Ok(Self { surface, config })
+        if config.height == 0 || config.width == 0 {
+            config.height = 1;
+            config.width = 1;
+        }
+
+        Ok(Self { surface, config, is_configured: false })
+    }
+
+    fn apply_config(&mut self, device: &wgpu::Device) {
+        self.surface.configure(device, &self.config);
+        self.is_configured = true;
+    }
+
+    pub fn ensure_configured(&mut self, device: &wgpu::Device) {
+        if self.is_configured == true {
+            return;
+        }
+
+        self.apply_config(device);
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) {
+        if size.height == 0 || size.height == 0 {
+            return;
+        }
+
+        if self.config.height != size.height || self.config.width != size.width {
+            self.config.height = size.height;
+            self.config.width = size.width;
+            self.apply_config(device);
+        }
+    }
+
+    pub fn recover_lost(&mut self, device: &wgpu::Device) {
+        self.apply_config(device);
     }
 }
 
-pub struct RenderDeviceConfig {
+pub struct RenderConfig {
     pub instance_descriptor: wgpu::InstanceDescriptor,
     pub adapter_options: wgpu::RequestAdapterOptions<'static, 'static>,
     pub device_descriptor: wgpu::DeviceDescriptor<'static>,
 }
 
-impl Default for RenderDeviceConfig {
+impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             instance_descriptor: wgpu::InstanceDescriptor {
@@ -73,18 +108,17 @@ impl RenderDevice {
     pub async fn new(
         instance: &wgpu::Instance,
         render_surface: &RenderSurface,
-        config: impl Into<Option<RenderDeviceConfig>>,
+        device_descriptor: &wgpu::DeviceDescriptor<'_>,
+        adapter_options: wgpu::RequestAdapterOptions<'_, '_>,
     ) -> anyhow::Result<Self> {
-        let config = config.into().unwrap_or_default();
-
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&render_surface.surface),
-                ..config.adapter_options
+                ..adapter_options
             })
             .await?;
 
-        let (device, queue) = adapter.request_device(&config.device_descriptor).await?;
+        let (device, queue) = adapter.request_device(device_descriptor).await?;
 
         Ok(Self { device, queue })
     }

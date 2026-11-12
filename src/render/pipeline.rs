@@ -1,9 +1,13 @@
 mod shader_reflection;
 
-use std::{collections::HashMap, hash::{DefaultHasher, Hash, Hasher}, num::NonZero};
+use std::{
+    collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
+    num::NonZero,
+};
 
 use anyhow::Ok;
-use wgpu::naga::self;
+use wgpu::naga;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,11 +50,17 @@ impl PipelineRegistry {
         let device = device.clone();
         let render_pipelines = HashMap::<RenderPipelineKey, RenderPipeline>::new();
         // let compute_pipelines = HashMap::<ComputePipelineKey, ComputePipeline>::new();
-        
-        Self { device, render_pipelines }
+
+        Self {
+            device,
+            render_pipelines,
+        }
     }
 
-    pub fn add_graphics_pipeline(&mut self, pipeline_builder: RenderPipelineBuilder) -> anyhow::Result<RenderPipelineKey> {
+    pub fn add_graphics_pipeline(
+        &mut self,
+        pipeline_builder: RenderPipelineBuilder,
+    ) -> anyhow::Result<RenderPipelineKey> {
         let key = RenderPipelineKey(pipeline_builder.compute_hash());
         let pipeline = pipeline_builder.build(&self.device)?;
 
@@ -62,14 +72,13 @@ impl PipelineRegistry {
     pub fn get_graphics_pipeline(&self, key: &RenderPipelineKey) -> anyhow::Result<RenderPipeline> {
         match self.render_pipelines.get(key) {
             Some(pipeline) => Ok(pipeline.clone()),
-            None => anyhow::bail!("Requested render pipeline does not exist")
+            None => anyhow::bail!("Requested render pipeline does not exist"),
         }
     }
 
     // pub fn add_compute_pipeline(pipeline_builder: ComputePipelineBuilder) -> anyhow::Result<()> {
     //     todo!();
     // }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,7 +126,12 @@ pub struct RenderPipelineBuilder<'a> {
     depth_stencil: Option<wgpu::DepthStencilState>,
 
     // Targets
-    vertex_input_targets: Option<&'a [(shader_reflection::VertexInputTarget<'a>, wgpu::VertexStepMode)]>,
+    vertex_input_targets: Option<
+        &'a [(
+            shader_reflection::VertexInputTarget<'a>,
+            wgpu::VertexStepMode,
+        )],
+    >,
     fragment_output_targets: Vec<Option<wgpu::ColorTargetState>>,
 
     // Pipeline Cache
@@ -262,7 +276,10 @@ impl<'a> RenderPipelineBuilder<'a> {
 
     pub fn with_vertex_input_targets(
         mut self,
-        vertex_input_targets: &'a [(shader_reflection::VertexInputTarget<'a>, wgpu::VertexStepMode)],
+        vertex_input_targets: &'a [(
+            shader_reflection::VertexInputTarget<'a>,
+            wgpu::VertexStepMode,
+        )],
     ) -> Self {
         self.vertex_input_targets = Some(vertex_input_targets);
         self
@@ -287,7 +304,9 @@ impl<'a> RenderPipelineBuilder<'a> {
             label: Some(self.shader_path),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
-        let mut vertex_buffer_layout_builders: Vec<Option<shader_reflection::VertexBufferLayoutBuilder>> = Vec::new();
+        let mut vertex_buffer_layout_builders: Vec<
+            Option<shader_reflection::VertexBufferLayoutBuilder>,
+        > = Vec::new();
         let reflection = shader_reflection::ShaderReflection::reflect_module(
             device,
             &module,
@@ -297,13 +316,14 @@ impl<'a> RenderPipelineBuilder<'a> {
             },
             &mut vertex_buffer_layout_builders,
         )?;
-        let vertex_buffer_layouts: Vec<Option<wgpu::VertexBufferLayout>> = vertex_buffer_layout_builders
-            .iter_mut()
-            .map(|slot| match slot{
-                Some(layout) => Some(layout.create_buffer_layout()),
-                None => None,
-            })
-            .collect();
+        let vertex_buffer_layouts: Vec<Option<wgpu::VertexBufferLayout>> =
+            vertex_buffer_layout_builders
+                .iter_mut()
+                .map(|slot| match slot {
+                    Some(layout) => Some(layout.create_buffer_layout()),
+                    None => None,
+                })
+                .collect();
         let layout_label = format!("{} layout", self.label);
         let bind_group_layouts = reflection.bind_group_layouts;
         let bind_group_refs: Vec<Option<&wgpu::BindGroupLayout>> = bind_group_layouts
@@ -335,7 +355,7 @@ impl<'a> RenderPipelineBuilder<'a> {
                 compilation_options: wgpu::PipelineCompilationOptions::default(), // Technically could be determined during shader reflection, TODO!!!
                 buffers: &vertex_buffer_layouts[..],
             },
-            fragment: frag_ep.as_deref().map(|entry | { 
+            fragment: frag_ep.as_deref().map(|entry| {
                 wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some(entry),

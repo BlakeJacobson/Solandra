@@ -176,7 +176,7 @@ impl ShaderReflection {
                                     &mut vertex_attributes,
                                 )?;
 
-                                vertex_buffer_builders.push( match vertex_attributes.is_empty() {
+                                vertex_buffer_builders.push(match vertex_attributes.is_empty() {
                                     true => None,
                                     false => Some(VertexBufferLayoutBuilder {
                                         stride: offset,
